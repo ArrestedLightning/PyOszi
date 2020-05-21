@@ -73,6 +73,7 @@ class PyOszi:
     screenshot_cmd = [0x53, 0x02, 0x00, 0x20, 0x75]
     
     image_buffer = []
+    screenshot_callback = None
     
     
     def __init__(self, debug=False):
@@ -139,7 +140,7 @@ class PyOszi:
         command = resp[3]
         length -= 1
         if self.debug:
-            print ("Mrk: {:x}, cmd: {:x}, len: {:x}".format(marker, command, length))
+            print("Mrk: {:x}, cmd: {:x}, len: {:x}".format(marker, command, length))
         #todo: validate checksum
         if marker == 0x53:
             if command == 0x80:
@@ -157,7 +158,10 @@ class PyOszi:
                         print("Received end of screenshot")
                     image_bytes = bytes(self.image_buffer)
                     img = Image.frombuffer("RGB", (800, 480), image_bytes, 'raw', "BGR;16", 0, 1)
-                    img.show()
+                    #img.show()
+                    if self.screenshot_callback:
+                        self.screenshot_callback(img)
+                        self.screenshot_callback = None
                     self.image_buffer = []
             
         
@@ -291,11 +295,15 @@ class PyOszi:
         cmd = self.btn_cmd + button
         self.send_cmd(cmd)
         
-    def request_screenshot(self):
-        """Requests the scope to send an image of its screen."""
+    def request_screenshot(self, callback):
+        """Requests the scope to send an image of its screen.
+        The specified callback function is called with the 
+        image as an argument when it is available."""
         if self.debug:
             print("PyOszi request screenshot")
-        self.send_cmd(self.screenshot_cmd)
+        if callback:
+            self.screenshot_callback = callback
+            self.send_cmd(self.screenshot_cmd)
         
             
 if __name__ == "__main__":
