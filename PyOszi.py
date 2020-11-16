@@ -71,9 +71,12 @@ class PyOszi:
     beep_cmd = [0x43, 0x03, 0x00, 0x44]
     btn_cmd = [0x53, 0x04, 0x00, 0x13]
     screenshot_cmd = [0x53, 0x02, 0x00, 0x20, 0x75]
+    read_sample_data_cmd = [0x53, 0x04, 0x00, 0x02, 0x01]
     
     image_buffer = []
+    raw_data_buffer = []
     screenshot_callback = None
+    data_callback = None
     
     
     def __init__(self, debug=False):
@@ -146,7 +149,7 @@ class PyOszi:
             if command == 0x80:
                 if self.debug:
                     print("Received echo")
-            elif command == 0xa0:
+            elif command == 0xa0: #Screenshot response
                 subcommand = resp[4]
                 if subcommand == 0x01:
                     if self.debug:
@@ -163,6 +166,33 @@ class PyOszi:
                         self.screenshot_callback(img)
                         self.screenshot_callback = None
                     self.image_buffer = []
+            elif command == 0x82: #Raw sample data response
+                subcommand = resp[4]
+                if subcommand == 0x00:
+                    pass #This packet only contains expected data length, which we don't need
+                elif subcommand == 0x01:
+                    channel = resp[5]
+                    if self.debug:
+                        print("Received raw sample data on channel {}".format(channel))
+                    self.raw_data_buffer += resp[6:-1]
+                elif subcommand == 0x02:
+                    channel = resp[5]
+                    if self.debug:
+                        print("Received end of raw data on channel {}".format(channel))
+                    if self.data_callback:
+                        #Interpret data as signed 8-bit number and map to [-1, 1]
+                        raw_data_float = [(b / 127.0) if b < 128 else ((b - 256) / 128.0) for b in self.raw_data_buffer]
+                        self.data_callback(raw_data_float, channel)
+                        self.data_callback = None
+                    self.raw_data_buffer = []
+                elif subcommand == 0x03:
+                    channel = resp[5]
+                    if self.debug:
+                        print("Error receiving raw data on channel {}".format(channel))
+                    if self.data_callback:
+                        self.data_callback(None, channel)
+                        self.data_callback = None
+                    self.raw_data_buffer = []
             
         
     
@@ -304,6 +334,20 @@ class PyOszi:
         if callback:
             self.screenshot_callback = callback
             self.send_cmd(self.screenshot_cmd)
+
+    def request_raw_data(self, channel, callback):
+        """Requests the scope to send raw sample data from channel 1 (0) or
+        channel 2 (1).  Note that this data depends on the voltage scaling and offset
+        that are configured on the scope, and this library does not currently account
+        for that information.  The scope returns data as signed 8-bit numbers.  The
+        library will convert the data to floating point numbers in the range [-1, 1]
+        before returning it to the caller."""
+        if self.debug:
+            print("PyOszi request raw data channel {}".format(channel))
+        if callback:
+            self.data_callback = callback
+            assert channel in [0, 1]
+            self.send_cmd(self.read_sample_data_cmd + [channel])
         
             
 if __name__ == "__main__":
@@ -314,6 +358,5 @@ if __name__ == "__main__":
     scope.beep(1)
     sleep(2)
     scope.press_button(b.BTN_SINGLE_SEQ)
-    scope.request_screenshot()
     sleep(10)
     scope.close()
